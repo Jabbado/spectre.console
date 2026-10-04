@@ -59,11 +59,11 @@ public sealed class FigletText : Renderable, IHasJustification
 
         foreach (var row in GetRows(maxWidth))
         {
-            (int Amount, char[]? MergeChars)[]? junctions = null;
+            Junction[]? junctions = null;
             if (LayoutMode is FigletLayoutMode.Fitted or FigletLayoutMode.Smushed
                 && row.Count > 1)
             {
-                junctions = new (int, char[]?)[row.Count - 1];
+                junctions = new Junction[row.Count - 1];
                 var smushRules = LayoutMode == FigletLayoutMode.Smushed ? _font.SmushingRules : 0;
                 for (var i = 0; i < row.Count - 1; i++)
                 {
@@ -123,7 +123,7 @@ public sealed class FigletText : Renderable, IHasJustification
         }
     }
 
-    private static (int Amount, char[]? MergeChars) ComputeJunction(
+    private static Junction ComputeJunction(
         FigletCharacter left, FigletCharacter right,
         FigletLayoutMode mode, int smushRules, char hardblank)
     {
@@ -149,12 +149,12 @@ public sealed class FigletText : Renderable, IHasJustification
         // Never fit or smush the input space character; preserve natural spacing
         if (left.Code == 32 || right.Code == 32)
         {
-            return (0, null);
+            return new(0, null);
         }
 
         if (mode != FigletLayoutMode.Smushed)
         {
-            return (fit, null);
+            return new(fit, null);
         }
 
         // Try smushing: go one column further than
@@ -185,13 +185,13 @@ public sealed class FigletText : Renderable, IHasJustification
             var merged = SmushChars(leftChar, rightChar, smushRules, hardblank);
             if (merged == null)
             {
-                return (fit, null);
+                return new(fit, null);
             }
 
             mergeChars[i] = merged.Value;
         }
 
-        return (fit + 1, mergeChars);
+        return new(fit + 1, mergeChars);
     }
 
     private static char? SmushChars(char left, char right, int rules, char hardblank)
@@ -328,7 +328,7 @@ public sealed class FigletText : Renderable, IHasJustification
     private static string BuildLine(
         IReadOnlyList<FigletCharacter> row,
         int lineIndex,
-        IReadOnlyList<(int Amount, char[]? MergeChars)> junctions,
+        IReadOnlyList<Junction> junctions,
         char hardblank)
     {
         if (row.Count == 0)
@@ -444,6 +444,7 @@ public sealed class FigletText : Renderable, IHasJustification
 
         return result;
     }
+    private readonly record struct Junction(int Amount, char[]? MergeChars);
 }
 
 /// <summary>
