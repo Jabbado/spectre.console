@@ -57,19 +57,10 @@ public sealed class FigletText : Renderable, IHasJustification
         var style = new Style(Color ?? Console.Color.Default);
         var alignment = Justification ?? Justify.Left;
 
-        foreach (var row in GetRows(maxWidth))
+        foreach (var rowData in GetRows(LayoutMode, maxWidth))
         {
-            Junction[]? junctions = null;
-            if (LayoutMode is FigletLayoutMode.Fitted or FigletLayoutMode.Smushed
-                && row.Count > 1)
-            {
-                junctions = new Junction[row.Count - 1];
-                var smushRules = LayoutMode == FigletLayoutMode.Smushed ? _font.SmushingRules : 0;
-                for (var i = 0; i < row.Count - 1; i++)
-                {
-                    junctions[i] = ComputeJunction(row[i], row[i + 1], LayoutMode, smushRules, _font.Hardblank);
-                }
-            }
+            var row = rowData.Characters;
+            var junctions = rowData.Junctions;
 
             for (var index = 0; index < _font.Height; index++)
             {
@@ -384,22 +375,44 @@ public sealed class FigletText : Renderable, IHasJustification
         return sb.ToString();
     }
 
-    private List<List<FigletCharacter>> GetRows(int maxWidth)
+    private List<(List<FigletCharacter> Characters, List<Junction>? Junctions)> GetRows(FigletLayoutMode layoutMode, int maxWidth)
     {
-        var result = new List<List<FigletCharacter>>();
+        var junctionsRequired = layoutMode is (FigletLayoutMode.Fitted or FigletLayoutMode.Smushed) ? true : false;
+        var smushRules = LayoutMode == FigletLayoutMode.Smushed ? _font.SmushingRules : 0;
+
+        var result = new List<(List<FigletCharacter> chars, List<Junction>? junctions)>();
+
         var words = _text.SplitWords();
 
         var totalWidth = 0;
         var line = new List<FigletCharacter>();
+        var lineJunctions = junctionsRequired ? new List<Junction>() : null;
 
         foreach (var word in words)
         {
             // Does the whole word fit?
             var width = _font.GetWidth(word);
+
+            var wordChars = _font.GetCharacters(word) as List<FigletCharacter>;
+
+            if ((wordChars is null) || (wordChars.Count == 0))
+                continue;
+
+            Junction[]? wordJunctions = null;
+
+            // Take into account the width reduction due to
+            // smushing/fitting text if enabled
+            if (junctionsRequired)
+            {
+                wordJunctions = GetWordJunctions(wordChars);
+                var reduceWidth = wordJunctions.Sum(j => j.Amount);
+                width -= reduceWidth;
+            }
+
             if (width + totalWidth < maxWidth)
             {
                 // Add it to the line
-                line.AddRange(_font.GetCharacters(word));
+                AppendToLine(wordChars, wordJunctions);
                 totalWidth += width;
             }
             else
@@ -408,11 +421,13 @@ public sealed class FigletText : Renderable, IHasJustification
                 if (width < maxWidth)
                 {
                     // Flush the line
-                    result.Add(line);
+                    result.Add((line, lineJunctions));
                     line = [];
+                    lineJunctions = junctionsRequired ? [] : null;
+
                     totalWidth = 0;
 
-                    line.AddRange(_font.GetCharacters(word));
+                    AppendToLine(wordChars, wordJunctions);
                     totalWidth += width;
                 }
                 else
@@ -425,13 +440,25 @@ public sealed class FigletText : Renderable, IHasJustification
                         if (totalWidth + current.Width > maxWidth)
                         {
                             // Flush the line
-                            result.Add(line);
+                            result.Add((line, lineJunctions));
                             line = [];
+                            lineJunctions = junctionsRequired ? [] : null;
+
                             totalWidth = 0;
                         }
 
+                        var charWidth = current.Width;
+
+                        if (junctionsRequired && line.Count > 0)
+                        {
+                            var junction = ComputeJunction(line[line.Count - 1], current, layoutMode, smushRules, _font.Hardblank);
+                            lineJunctions?.Add(junction);
+                            charWidth -= junction.Amount;
+                        }
+
                         line.Add(current);
-                        totalWidth += current.Width;
+
+                        totalWidth += charWidth;
                     }
                 }
             }
@@ -439,11 +466,46 @@ public sealed class FigletText : Renderable, IHasJustification
 
         if (line.Count > 0)
         {
-            result.Add(line);
+            result.Add((line, lineJunctions));
         }
 
         return result;
+
+
+        // Helper for appending chars and junctions to current line
+        void AppendToLine(List<FigletCharacter> wordChars, Junction[]? wordJunctions)
+        {
+            if (wordJunctions is not null)
+            {
+                if (line.Count > 0)
+                {
+                    var prevJunction = ComputeJunction(line[line.Count - 1], wordChars[0], layoutMode, smushRules, _font.Hardblank);
+                    lineJunctions?.Add(prevJunction);
+                }
+
+                lineJunctions?.AddRange(wordJunctions);
+            }
+
+            line.AddRange(wordChars);
+        }
     }
+
+    private Junction[] GetWordJunctions(List<FigletCharacter> word)
+    {
+        var junctions = new Junction[word.Count - 1];
+        var smushRules = LayoutMode == FigletLayoutMode.Smushed ? _font.SmushingRules : 0;
+
+        for (var i = 0; i < word.Count - 1; i++)
+        {
+            var leftChar = word[i];
+            var rightChar = word[i + 1];
+            junctions[i] = ComputeJunction(leftChar, rightChar, LayoutMode, smushRules, _font.Hardblank);
+
+        }
+
+        return junctions;
+    }
+
     private readonly record struct Junction(int Amount, char[]? MergeChars);
 }
 
